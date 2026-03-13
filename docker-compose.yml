@@ -1,0 +1,51 @@
+version: '3.8'
+ 
+services:
+  db:
+    image: postgres:17
+    container_name: dj_brate_db
+    environment:
+      POSTGRES_USER: djuser
+      POSTGRES_PASSWORD: dj
+      POSTGRES_DB: dj_brate
+      TZ: Europe/Zagreb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U djuser -d dj_brate"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+ 
+  app:
+    build: .
+    container_name: dj_brate_app
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TZ: Europe/Zagreb
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=dj_brate;Username=djuser;Password=dj"
+ 
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      TZ: Europe/Zagreb
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+ 
+volumes:
+  pgdata: {}
+  pgadmin_data: {}
