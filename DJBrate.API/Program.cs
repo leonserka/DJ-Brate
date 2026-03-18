@@ -1,6 +1,6 @@
-using DJBrate.API;
+using DJBrate.API.Data;
 using Microsoft.EntityFrameworkCore;
- 
+
 var builder = WebApplication.CreateBuilder(args);
  
 builder.Services.AddEndpointsApiExplorer();
