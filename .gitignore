@@ -31,3 +31,5 @@ logs/
 
 # Docker
 *.db
+
+*PLAN.md
