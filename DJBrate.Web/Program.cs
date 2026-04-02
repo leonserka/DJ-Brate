@@ -1,9 +1,5 @@
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Security.Claims;
-using System.Text;
 using DJBrate.Application.Interfaces;
-using DJBrate.Application.Models.Spotify;
 using DJBrate.Application.Services;
 using DJBrate.Domain.Entities;
 using DJBrate.Domain.Interfaces;
@@ -14,6 +10,7 @@ using DJBrate.Web.Components;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
+using DJBrate.Application.Models.Spotify;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,6 +32,8 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddHttpClient();
+
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IMoodSessionRepository, MoodSessionRepository>();
 builder.Services.AddScoped<IPlaylistRepository, PlaylistRepository>();
@@ -46,7 +45,6 @@ builder.Services.AddScoped<IMoodSessionService, MoodSessionService>();
 builder.Services.AddScoped<IPlaylistService, PlaylistService>();
 builder.Services.AddScoped<ISpotifyTokenService, SpotifyTokenService>();
 builder.Services.AddScoped<ISpotifyDataSyncService, SpotifyDataSyncService>();
-
 builder.Services.AddScoped<ISpotifyApiClient, SpotifyApiClient>();
 
 var app = builder.Build();
@@ -92,7 +90,13 @@ app.MapGet("/auth/spotify/login", (HttpContext ctx, IConfiguration config) =>
     return Results.Redirect(url);
 });
 
-app.MapGet("/auth/spotify/callback", async (HttpContext ctx, IConfiguration config, IUserService userService, ISpotifyDataSyncService syncService) =>
+app.MapGet("/auth/spotify/callback", async (
+    HttpContext ctx,
+    IConfiguration config,
+    IUserService userService,
+    ISpotifyTokenService tokenService,
+    ISpotifyApiClient spotifyClient,
+    ISpotifyDataSyncService syncService) =>
 {
     var code  = ctx.Request.Query["code"].ToString();
     var state = ctx.Request.Query["state"].ToString();
@@ -107,40 +111,9 @@ app.MapGet("/auth/spotify/callback", async (HttpContext ctx, IConfiguration conf
 
     ctx.Response.Cookies.Delete(SpotifyConstants.OAuthStateCookie);
 
-    var clientId     = config["Spotify:ClientId"]!;
-    var clientSecret = config["Spotify:ClientSecret"]!;
-    var redirectUri  = config["Spotify:RedirectUri"]!;
-    var credentials  = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
+    var tokens  = await tokenService.ExchangeCodeForTokensAsync(code, config["Spotify:RedirectUri"]!);
+    var profile = await spotifyClient.GetProfileAsync(tokens.AccessToken);
 
-    SpotifyTokenResponse token;
-    using (var tokenHttp = new HttpClient())
-    {
-        tokenHttp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
-        var tokenResponse = await tokenHttp.PostAsync(SpotifyConstants.TokenUrl,
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"]   = "authorization_code",
-                ["code"]         = code,
-                ["redirect_uri"] = redirectUri
-            }));
-
-        if (!tokenResponse.IsSuccessStatusCode)
-            return Results.Redirect($"/login?spotifyError=token_failed_{(int)tokenResponse.StatusCode}");
-
-        token = (await tokenResponse.Content.ReadFromJsonAsync<SpotifyTokenResponse>())!;
-    }
-
-    using var profileHttp = new HttpClient();
-    profileHttp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
-    var profileResponse = await profileHttp.GetAsync(SpotifyConstants.ProfileUrl);
-
-    if (!profileResponse.IsSuccessStatusCode)
-    {
-        var errBody = await profileResponse.Content.ReadAsStringAsync();
-        return Results.Redirect($"/login?spotifyError={Uri.EscapeDataString((int)profileResponse.StatusCode + ": " + errBody)}");
-    }
-
-    var profile     = (await profileResponse.Content.ReadFromJsonAsync<SpotifyProfileResponse>())!;
     var spotifyId   = profile.Id;
     var displayName = profile.DisplayName ?? spotifyId;
     var email       = profile.Email ?? $"{spotifyId}{SpotifyConstants.PlaceholderEmailSuffix}";
@@ -157,9 +130,9 @@ app.MapGet("/auth/spotify/callback", async (HttpContext ctx, IConfiguration conf
         DisplayName         = displayName,
         Email               = email,
         AvatarUrl           = avatarUrl,
-        SpotifyAccessToken  = token.AccessToken,
-        SpotifyRefreshToken = token.RefreshToken,
-        TokenExpiresAt      = DateTime.UtcNow.AddSeconds(token.ExpiresIn),
+        SpotifyAccessToken  = tokens.AccessToken,
+        SpotifyRefreshToken = tokens.RefreshToken,
+        TokenExpiresAt      = DateTime.UtcNow.AddSeconds(tokens.ExpiresIn),
         Role                = SpotifyConstants.DefaultUserRole
     });
 

@@ -4,9 +4,10 @@ namespace DJBrate.Application.Interfaces;
 
 public interface ISpotifyApiClient
 {
+    Task<SpotifyProfileResponse> GetProfileAsync(string accessToken);
     Task<List<SpotifyTrack>> GetTopTracksAsync(string accessToken, SpotifyTimeRange timeRange);
     Task<List<SpotifyArtist>> GetTopArtistsAsync(string accessToken, SpotifyTimeRange timeRange);
     Task<List<SpotifyTrack>> GetRecommendationsAsync(string accessToken, List<string> seedArtistIds, List<string> seedTrackIds, AudioFeatureTargets features);
-    Task<string> CreatePlaylistAsync(string accessToken, string spotifyUserId, string name, string description);
+    Task<string> CreatePlaylistAsync(string accessToken, string name, string description);
     Task AddTracksToPlaylistAsync(string accessToken, string playlistId, List<string> trackUris);
 }

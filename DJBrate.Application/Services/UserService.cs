@@ -24,6 +24,7 @@ public class UserService : IUserService
         var existing = await _userRepository.GetBySpotifyIdAsync(user.SpotifyId!);
         if (existing is null)
         {
+            user.LastLoginAt = DateTime.UtcNow;
             await _userRepository.AddAsync(user);
             return user;
         }

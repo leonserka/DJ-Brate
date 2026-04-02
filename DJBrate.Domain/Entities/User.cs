@@ -18,9 +18,6 @@ public class User
     [Column("email")]
     public string Email { get; set; } = null!;
 
-    [Column("password_hash")]
-    public string? PasswordHash { get; set; }
-
     [Required]
     [Column("role")]
     public string Role { get; set; } = "user";

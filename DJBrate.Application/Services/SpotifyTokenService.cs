@@ -11,13 +11,37 @@ namespace DJBrate.Application.Services;
 
 public class SpotifyTokenService : ISpotifyTokenService
 {
-    private readonly IUserRepository _userRepository;
-    private readonly IConfiguration  _configuration;
+    private readonly IUserRepository    _userRepository;
+    private readonly IConfiguration     _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public SpotifyTokenService(IUserRepository userRepository, IConfiguration configuration)
+    public SpotifyTokenService(
+        IUserRepository userRepository,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory)
     {
-        _userRepository = userRepository;
-        _configuration  = configuration;
+        _userRepository    = userRepository;
+        _configuration     = configuration;
+        _httpClientFactory = httpClientFactory;
+    }
+
+    public async Task<SpotifyTokenResponse> ExchangeCodeForTokensAsync(string code, string redirectUri)
+    {
+        var http = _httpClientFactory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", GetCredentials());
+
+        var response = await http.PostAsync(SpotifyConstants.TokenUrl,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"]   = "authorization_code",
+                ["code"]         = code,
+                ["redirect_uri"] = redirectUri
+            }));
+
+        response.EnsureSuccessStatusCode();
+
+        return await response.Content.ReadFromJsonAsync<SpotifyTokenResponse>()
+            ?? throw new InvalidOperationException("Failed to deserialize token response.");
     }
 
     public async Task<string> EnsureValidTokenAsync(User user)
@@ -29,12 +53,8 @@ public class SpotifyTokenService : ISpotifyTokenService
         if (string.IsNullOrEmpty(user.SpotifyRefreshToken))
             throw new InvalidOperationException("No Spotify refresh token available for this user.");
 
-        var clientId     = _configuration["Spotify:ClientId"]!;
-        var clientSecret = _configuration["Spotify:ClientSecret"]!;
-        var credentials  = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
-
-        using var http = new HttpClient();
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+        var http = _httpClientFactory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", GetCredentials());
 
         var response = await http.PostAsync(SpotifyConstants.TokenUrl,
             new FormUrlEncodedContent(new Dictionary<string, string>
@@ -45,8 +65,10 @@ public class SpotifyTokenService : ISpotifyTokenService
 
         response.EnsureSuccessStatusCode();
 
-        var token = await response.Content.ReadFromJsonAsync<SpotifyTokenResponse>();
-        user.SpotifyAccessToken = token!.AccessToken;
+        var token = await response.Content.ReadFromJsonAsync<SpotifyTokenResponse>()
+            ?? throw new InvalidOperationException("Failed to deserialize token response.");
+
+        user.SpotifyAccessToken = token.AccessToken;
         user.TokenExpiresAt     = DateTime.UtcNow.AddSeconds(token.ExpiresIn);
 
         if (token.RefreshToken is not null)
@@ -54,5 +76,12 @@ public class SpotifyTokenService : ISpotifyTokenService
 
         await _userRepository.UpdateAsync(user);
         return user.SpotifyAccessToken;
+    }
+
+    private string GetCredentials()
+    {
+        var clientId     = _configuration["Spotify:ClientId"]!;
+        var clientSecret = _configuration["Spotify:ClientSecret"]!;
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
     }
 }

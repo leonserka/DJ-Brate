@@ -56,7 +56,7 @@ namespace DJBrate.Infrastructure.Migrations
 
                     b.HasIndex("SessionId");
 
-                    b.ToTable("ai_conversation_messages");
+                    b.ToTable("ai_conversation_messages", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.AiModelConfig", b =>
@@ -99,7 +99,7 @@ namespace DJBrate.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ai_model_configs");
+                    b.ToTable("ai_model_configs", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.AiMoodMapping", b =>
@@ -155,7 +155,7 @@ namespace DJBrate.Infrastructure.Migrations
                     b.HasIndex("SessionId")
                         .IsUnique();
 
-                    b.ToTable("ai_mood_mappings");
+                    b.ToTable("ai_mood_mappings", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.ListeningStat", b =>
@@ -210,7 +210,7 @@ namespace DJBrate.Infrastructure.Migrations
                     b.HasIndex("UserId", "StatDate")
                         .IsUnique();
 
-                    b.ToTable("listening_stats");
+                    b.ToTable("listening_stats", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.McpToolCall", b =>
@@ -258,7 +258,7 @@ namespace DJBrate.Infrastructure.Migrations
 
                     b.HasIndex("SessionId");
 
-                    b.ToTable("mcp_tool_calls");
+                    b.ToTable("mcp_tool_calls", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.MoodSession", b =>
@@ -311,7 +311,7 @@ namespace DJBrate.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("mood_sessions");
+                    b.ToTable("mood_sessions", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.Playlist", b =>
@@ -357,7 +357,7 @@ namespace DJBrate.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("playlists");
+                    b.ToTable("playlists", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.PlaylistTrack", b =>
@@ -431,7 +431,7 @@ namespace DJBrate.Infrastructure.Migrations
 
                     b.HasIndex("PlaylistId");
 
-                    b.ToTable("playlist_tracks");
+                    b.ToTable("playlist_tracks", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.TrackFeedback", b =>
@@ -470,7 +470,7 @@ namespace DJBrate.Infrastructure.Migrations
                     b.HasIndex("UserId", "PlaylistTrackId")
                         .IsUnique();
 
-                    b.ToTable("track_feedbacks");
+                    b.ToTable("track_feedbacks", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.User", b =>
@@ -502,10 +502,6 @@ namespace DJBrate.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_login_at");
 
-                    b.Property<string>("PasswordHash")
-                        .HasColumnType("text")
-                        .HasColumnName("password_hash");
-
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("text")
@@ -535,7 +531,7 @@ namespace DJBrate.Infrastructure.Migrations
                     b.HasIndex("SpotifyId")
                         .IsUnique();
 
-                    b.ToTable("users");
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.UserTopArtist", b =>
@@ -581,7 +577,7 @@ namespace DJBrate.Infrastructure.Migrations
                     b.HasIndex("UserId", "SpotifyArtistId", "TimeRange")
                         .IsUnique();
 
-                    b.ToTable("user_top_artists");
+                    b.ToTable("user_top_artists", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.UserTopTrack", b =>
@@ -633,7 +629,7 @@ namespace DJBrate.Infrastructure.Migrations
                     b.HasIndex("UserId", "SpotifyTrackId", "TimeRange")
                         .IsUnique();
 
-                    b.ToTable("user_top_tracks");
+                    b.ToTable("user_top_tracks", (string)null);
                 });
 
             modelBuilder.Entity("DJBrate.Domain.Entities.AiConversationMessage", b =>

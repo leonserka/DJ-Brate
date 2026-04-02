@@ -15,6 +15,20 @@ public class SpotifyApiClient : ISpotifyApiClient
 
     private static SpotifyClient Client(string accessToken) => new(accessToken);
 
+    public async Task<SpotifyProfileResponse> GetProfileAsync(string accessToken)
+    {
+        var profile = await Client(accessToken).UserProfile.Current();
+        return new SpotifyProfileResponse
+        {
+            Id          = profile.Id,
+            DisplayName = profile.DisplayName,
+#pragma warning disable CS0618
+            Email       = profile.Email,
+#pragma warning restore CS0618
+            Images      = profile.Images?.Select(i => new SpotifyImage { Url = i.Url }).ToList() ?? []
+        };
+    }
+
     public async Task<List<SpotifyTrack>> GetTopTracksAsync(string accessToken, SpotifyTimeRange timeRange)
     {
         var result = await Client(accessToken).Personalization.GetTopTracks(new PersonalizationTopRequest
@@ -57,7 +71,7 @@ public class SpotifyApiClient : ISpotifyApiClient
     }
 
     public async Task<string> CreatePlaylistAsync(
-        string accessToken, string spotifyUserId, string name, string description)
+        string accessToken, string name, string description)
     {
         var playlist = await Client(accessToken).Playlists.Create(
             new PlaylistCreateRequest(name) { Description = description, Public = false });
