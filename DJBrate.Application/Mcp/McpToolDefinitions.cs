@@ -10,7 +10,7 @@ public static class McpToolDefinitions
         new AiToolDefinition
         {
             Name = ToolNames.GetUserTopTracks,
-            Description = "Get the user's top tracks from Spotify. Returns track names, artists, and Spotify IDs. Use this to understand the user's music taste before making recommendations.",
+            Description = "OPTIONAL context tool. Returns the user's top tracks from Spotify. Only call this if the user explicitly asks the playlist to reference, extend, or feel similar to what they already listen to. If the user is asking for discovery, new music, or a specific vibe unrelated to their history, DO NOT call this.",
             Parameters = JsonDocument.Parse("""
             {
                 "type": "object",
@@ -28,7 +28,7 @@ public static class McpToolDefinitions
         new AiToolDefinition
         {
             Name = ToolNames.GetUserTopArtists,
-            Description = "Get the user's top artists from Spotify. Returns artist names, genres, and Spotify IDs. Use this to understand the user's preferred genres and artists.",
+            Description = "OPTIONAL context tool. Returns the user's top artists and their genres. Only call this if the user explicitly asks the playlist to be based on, similar to, or inspired by their own listening history. For pure discovery or prompt-driven playlists, DO NOT call this.",
             Parameters = JsonDocument.Parse("""
             {
                 "type": "object",
@@ -42,56 +42,12 @@ public static class McpToolDefinitions
                 "required": ["time_range"]
             }
             """)
-        },
-        new AiToolDefinition
-        {
-            Name = ToolNames.GetRecommendations,
-            Description = "Get track recommendations from Spotify based on seed artists, seed tracks, and audio feature targets. Use this to generate playlist tracks that match the user's mood.",
-            Parameters = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "seed_artist_ids": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Spotify artist IDs to seed recommendations (max 3)"
-                    },
-                    "seed_track_ids": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Spotify track IDs to seed recommendations (max 2)"
-                    },
-                    "target_valence": {
-                        "type": "number",
-                        "description": "Target happiness/positivity from 0.0 (sad) to 1.0 (happy)"
-                    },
-                    "target_energy": {
-                        "type": "number",
-                        "description": "Target energy level from 0.0 (calm) to 1.0 (intense)"
-                    },
-                    "target_tempo": {
-                        "type": "number",
-                        "description": "Target tempo in BPM (e.g. 80 for slow, 120 for moderate, 160 for fast)"
-                    },
-                    "target_danceability": {
-                        "type": "number",
-                        "description": "Target danceability from 0.0 (least danceable) to 1.0 (most danceable)"
-                    },
-                    "target_acousticness": {
-                        "type": "number",
-                        "description": "Target acousticness from 0.0 (electronic) to 1.0 (acoustic)"
-                    }
-                },
-                "required": ["seed_artist_ids", "seed_track_ids"]
-            }
-            """)
         }
     ];
 
     public static class ToolNames
     {
-        public const string GetUserTopTracks   = "get_user_top_tracks";
-        public const string GetUserTopArtists  = "get_user_top_artists";
-        public const string GetRecommendations = "get_recommendations";
+        public const string GetUserTopTracks  = "get_user_top_tracks";
+        public const string GetUserTopArtists = "get_user_top_artists";
     }
 }

@@ -1,4 +1,3 @@
-using System.Globalization;
 using SpotifyAPI.Web;
 using DJBrate.Application.Interfaces;
 using DJBrate.Application.Models.Spotify;
@@ -7,11 +6,8 @@ namespace DJBrate.Infrastructure.Spotify;
 
 public class SpotifyApiClient : ISpotifyApiClient
 {
-    private const int TopItemsLimit        = 50;
-    private const int RecommendationsLimit = 30;
-    private const int MaxSeedArtists       = 3;
-    private const int MaxSeedTracks        = 2;
-    private const int PlaylistBatchSize    = 100;
+    private const int TopItemsLimit     = 50;
+    private const int PlaylistBatchSize = 100;
 
     private static SpotifyClient Client(string accessToken) => new(accessToken);
 
@@ -49,25 +45,22 @@ public class SpotifyApiClient : ISpotifyApiClient
         return result.Items?.Select(MapFullArtist).ToList() ?? [];
     }
 
-    public async Task<List<SpotifyTrack>> GetRecommendationsAsync(
-        string accessToken,
-        List<string> seedArtistIds,
-        List<string> seedTrackIds,
-        AudioFeatureTargets features)
+    public async Task<SpotifyTrack?> SearchTrackAsync(string accessToken, string artist, string title)
     {
-        var req = new RecommendationsRequest { Limit = RecommendationsLimit };
+        var query = string.IsNullOrWhiteSpace(artist)
+            ? $"track:\"{title}\""
+            : $"track:\"{title}\" artist:\"{artist}\"";
+        var result = await Client(accessToken).Search.Item(
+            new SearchRequest(SearchRequest.Types.Track, query) { Limit = 1 });
 
-        foreach (var id in seedArtistIds.Take(MaxSeedArtists)) req.SeedArtists.Add(id);
-        foreach (var id in seedTrackIds.Take(MaxSeedTracks))   req.SeedTracks.Add(id);
+        var track = result.Tracks.Items?.FirstOrDefault();
+        return track is null ? null : MapFullTrack(track);
+    }
 
-        SetTarget(req, "valence",      features.Valence,      "F2");
-        SetTarget(req, "energy",       features.Energy,       "F2");
-        SetTarget(req, "tempo",        features.Tempo,        "F0");
-        SetTarget(req, "danceability", features.Danceability, "F2");
-        SetTarget(req, "acousticness", features.Acousticness, "F2");
-
-        var result = await Client(accessToken).Browse.GetRecommendations(req);
-        return result.Tracks.Select(MapFullTrack).ToList();
+    public async Task<SpotifyArtist?> GetArtistAsync(string accessToken, string artistId)
+    {
+        var artist = await Client(accessToken).Artists.Get(artistId);
+        return artist is null ? null : MapFullArtist(artist);
     }
 
     public async Task<string> CreatePlaylistAsync(
@@ -75,7 +68,6 @@ public class SpotifyApiClient : ISpotifyApiClient
     {
         var playlist = await Client(accessToken).Playlists.Create(
             new PlaylistCreateRequest(name) { Description = description, Public = false });
-
         return playlist.Id!;
     }
 
@@ -87,10 +79,9 @@ public class SpotifyApiClient : ISpotifyApiClient
                 new PlaylistAddItemsRequest(batch.ToList()));
     }
 
-    private static void SetTarget(RecommendationsRequest req, string key, float? value, string format)
+    public async Task UploadPlaylistCoverAsync(string accessToken, string playlistId, string base64JpegImage)
     {
-        if (value.HasValue)
-            req.Target[key] = value.Value.ToString(format, CultureInfo.InvariantCulture);
+        await Client(accessToken).Playlists.UploadCover(playlistId, base64JpegImage);
     }
 
     private static PersonalizationTopRequest.TimeRange ToLibraryTimeRange(SpotifyTimeRange timeRange) =>
@@ -109,7 +100,11 @@ public class SpotifyApiClient : ISpotifyApiClient
         DurationMs = t.DurationMs,
         PreviewUrl = t.PreviewUrl,
         Artists    = t.Artists.Select(a => new SpotifyArtistRef { Id = a.Id, Name = a.Name }).ToList(),
-        Album      = new SpotifyAlbum { Name = t.Album.Name }
+        Album      = new SpotifyAlbum
+        {
+            Name   = t.Album.Name,
+            Images = t.Album.Images?.Select(i => new SpotifyImage { Url = i.Url }).ToList() ?? []
+        }
     };
 
     private static SpotifyArtist MapFullArtist(FullArtist a) => new()

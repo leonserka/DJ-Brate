@@ -9,15 +9,29 @@ using DJBrate.Infrastructure.Spotify;
 using DJBrate.Infrastructure.Ai;
 using DJBrate.Application.Mcp;
 using DJBrate.Web.Components;
+using DJBrate.Web.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using DJBrate.Application.Models.Spotify;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+var dpKeysPath = builder.Configuration["DataProtection:KeyPath"];
+if (!string.IsNullOrEmpty(dpKeysPath))
+{
+    Directory.CreateDirectory(dpKeysPath);
+    builder.Services.AddDataProtection()
+        .SetApplicationName("DJBrate")
+        .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath));
+}
+
+builder.Services.AddMemoryCache();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -55,6 +69,8 @@ builder.Services.AddScoped<ISpotifyApiClient, SpotifyApiClient>();
 builder.Services.AddScoped<IAiClient, GeminiClient>();
 builder.Services.AddScoped<IAiMoodService, AiMoodService>();
 builder.Services.AddScoped<McpDispatcher>();
+builder.Services.AddScoped<PlaybackState>();
+builder.Services.AddScoped<GenerationState>();
 
 var app = builder.Build();
 
@@ -63,48 +79,16 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 
-    if (!db.AiModelConfigs.Any())
+    if (!db.AiModelConfigs.Any(c => c.ConfigName == "default"))
     {
         db.AiModelConfigs.Add(new AiModelConfig
         {
             ConfigName   = "default",
             ModelName    = "gemini-2.5-flash",
-            Temperature  = 0.8f,
-            MaxTokens    = 2048,
+            Temperature  = 1.0f,
+            MaxTokens    = 3000,
             IsActive     = true,
-            SystemPrompt = """
-                You are DJ Brate, an AI DJ that creates personalized Spotify playlists based on the user's mood.
-
-                Your job:
-                1. Read the user's mood prompt carefully
-                2. Use the available tools to understand their music taste (call get_user_top_tracks and/or get_user_top_artists)
-                3. Based on their taste + mood, call get_recommendations with appropriate seed artists/tracks and audio feature targets
-                4. After getting recommendations, respond with a final JSON result
-
-                Audio feature guidelines:
-                - valence: 0.0 = sad/angry, 1.0 = happy/cheerful
-                - energy: 0.0 = calm/relaxed, 1.0 = intense/energetic
-                - tempo: 60-80 = slow, 100-120 = moderate, 130-160 = fast
-                - danceability: 0.0 = not danceable, 1.0 = very danceable
-                - acousticness: 0.0 = electronic/produced, 1.0 = acoustic/unplugged
-
-                When you have the final track list, respond with ONLY this JSON (no markdown, no extra text):
-                {
-                    "playlist_name": "a creative playlist name based on the mood",
-                    "playlist_description": "a short description of the playlist vibe",
-                    "detected_mood": "the mood you detected",
-                    "reasoning": "brief explanation of your choices",
-                    "audio_features": {
-                        "valence": 0.0-1.0,
-                        "energy": 0.0-1.0,
-                        "tempo": 60-180,
-                        "danceability": 0.0-1.0,
-                        "acousticness": 0.0-1.0
-                    }
-                }
-
-                Important: You MUST call at least get_user_top_artists or get_user_top_tracks first, then call get_recommendations. Do not skip tool calls.
-                """
+            SystemPrompt = ""
         });
         db.SaveChanges();
     }
@@ -116,20 +100,19 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+app.MapStaticAssets();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapGet("/auth/spotify/login", (HttpContext ctx, IConfiguration config) =>
+const string OAuthStateCacheKeyPrefix = "spotify_oauth_state:";
+var oauthStateTtl = TimeSpan.FromMinutes(SpotifyConstants.OAuthStateTtlMinutes);
+
+app.MapGet("/auth/spotify/login", (IMemoryCache cache, IConfiguration config) =>
 {
     var state = Guid.NewGuid().ToString("N");
-    ctx.Response.Cookies.Append(SpotifyConstants.OAuthStateCookie, state, new CookieOptions
-    {
-        HttpOnly = true,
-        SameSite = SameSiteMode.Lax,
-        MaxAge   = TimeSpan.FromMinutes(SpotifyConstants.OAuthStateCookieMaxAgeMinutes)
-    });
+    cache.Set(OAuthStateCacheKeyPrefix + state, true, oauthStateTtl);
 
     var clientId    = config["Spotify:ClientId"];
     var redirectUri = Uri.EscapeDataString(config["Spotify:RedirectUri"]!);
@@ -140,13 +123,15 @@ app.MapGet("/auth/spotify/login", (HttpContext ctx, IConfiguration config) =>
               $"&response_type=code" +
               $"&redirect_uri={redirectUri}" +
               $"&scope={scopes}" +
-              $"&state={state}";
+              $"&state={state}" +
+              $"&show_dialog=true";
 
     return Results.Redirect(url);
 });
 
 app.MapGet("/auth/spotify/callback", async (
     HttpContext ctx,
+    IMemoryCache cache,
     IConfiguration config,
     IUserService userService,
     ISpotifyTokenService tokenService,
@@ -160,11 +145,10 @@ app.MapGet("/auth/spotify/callback", async (
     if (!string.IsNullOrEmpty(error))
         return Results.Redirect("/login?spotifyError=access_denied");
 
-    var savedState = ctx.Request.Cookies[SpotifyConstants.OAuthStateCookie];
-    if (string.IsNullOrEmpty(savedState) || savedState != state)
+    var stateKey = OAuthStateCacheKeyPrefix + state;
+    if (string.IsNullOrEmpty(state) || !cache.TryGetValue(stateKey, out _))
         return Results.Redirect("/login?spotifyError=invalid_state");
-
-    ctx.Response.Cookies.Delete(SpotifyConstants.OAuthStateCookie);
+    cache.Remove(stateKey);
 
     var tokens  = await tokenService.ExchangeCodeForTokensAsync(code, config["Spotify:RedirectUri"]!);
     var profile = await spotifyClient.GetProfileAsync(tokens.AccessToken);

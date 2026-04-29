@@ -7,4 +7,20 @@ public interface IMoodSessionService
     Task<MoodSession?> GetSessionByIdAsync(Guid id);
     Task<IEnumerable<MoodSession>> GetSessionsByUserIdAsync(Guid userId);
     Task<MoodSession> CreateSessionAsync(MoodSession session);
+
+    Task<PlaylistGenerationResult> GenerateAsync(
+        User user,
+        string? promptText,
+        string? selectedMood,
+        string[]? selectedGenres,
+        float? energyLevel,
+        float? danceability,
+        string? playlistNameOverride,
+        string? playlistDescriptionOverride);
+}
+
+public class PlaylistGenerationResult
+{
+    public Playlist Playlist { get; set; } = null!;
+    public AiMoodResult Insights { get; set; } = null!;
 }

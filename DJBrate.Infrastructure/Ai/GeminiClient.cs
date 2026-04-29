@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -10,6 +11,7 @@ namespace DJBrate.Infrastructure.Ai;
 public class GeminiClient : IAiClient
 {
     private const string BaseUrl = "https://generativelanguage.googleapis.com/v1beta/models";
+    private const int MaxRetries = 3;
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _apiKey;
@@ -33,13 +35,23 @@ public class GeminiClient : IAiClient
     public async Task<AiResponse> SendMessageAsync(
         string systemPrompt,
         List<AiMessage> conversationHistory,
-        List<AiToolDefinition> tools)
+        List<AiToolDefinition> tools,
+        float? temperature = null,
+        int? maxOutputTokens = null)
     {
-        var request = BuildRequest(systemPrompt, conversationHistory, tools);
+        var request = BuildRequest(systemPrompt, conversationHistory, tools, temperature, maxOutputTokens);
         var url = $"{BaseUrl}/{_modelName}:generateContent?key={_apiKey}";
 
         var http = _httpClientFactory.CreateClient();
-        var response = await http.PostAsJsonAsync(url, request, JsonOptions);
+        HttpResponseMessage response = null!;
+        for (var attempt = 0; attempt < MaxRetries; attempt++)
+        {
+            response = await http.PostAsJsonAsync(url, request, JsonOptions);
+            if (!IsTransientError(response.StatusCode))
+                break;
+            if (attempt < MaxRetries - 1)
+                await Task.Delay(1000 * (attempt + 1));
+        }
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
@@ -49,7 +61,9 @@ public class GeminiClient : IAiClient
     private static object BuildRequest(
         string systemPrompt,
         List<AiMessage> conversationHistory,
-        List<AiToolDefinition> tools)
+        List<AiToolDefinition> tools,
+        float? temperature,
+        int? maxOutputTokens)
     {
         var contents = new List<object>();
 
@@ -109,6 +123,10 @@ public class GeminiClient : IAiClient
             parameters  = t.Parameters
         }).ToList();
 
+        var generationConfig = new Dictionary<string, object>();
+        if (temperature.HasValue)      generationConfig["temperature"]     = temperature.Value;
+        if (maxOutputTokens.HasValue)  generationConfig["maxOutputTokens"] = maxOutputTokens.Value;
+
         return new
         {
             systemInstruction = new
@@ -119,24 +137,24 @@ public class GeminiClient : IAiClient
             tools = new object[]
             {
                 new { functionDeclarations }
-            }
+            },
+            generationConfig
         };
     }
 
     private static object ParseToolResult(string json)
     {
-        try
-        {
-            var element = JsonSerializer.Deserialize<JsonElement>(json);
-            if (element.ValueKind == JsonValueKind.Array)
-                return new { results = element };
-            return element;
-        }
-        catch
-        {
-            return new { content = json };
-        }
+        var element = JsonSerializer.Deserialize<JsonElement>(json);
+        return element.ValueKind == JsonValueKind.Array
+            ? new { results = element }
+            : element;
     }
+
+    private static bool IsTransientError(HttpStatusCode code) =>
+        code is HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable;
 
     private static AiResponse ParseResponse(JsonDocument doc)
     {

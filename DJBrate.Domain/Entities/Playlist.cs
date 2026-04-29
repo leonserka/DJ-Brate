@@ -28,6 +28,9 @@ public class Playlist
     [Column("description")]
     public string? Description { get; set; }
 
+    [Column("image_url")]
+    public string? ImageUrl { get; set; }
+
     [Required]
     [Column("track_count")]
     public int TrackCount { get; set; } = 0;

@@ -1,0 +1,249 @@
+@page "/playlists"
+@page "/playlists/{Id:guid}"
+@attribute [Authorize]
+@implements IDisposable
+@using System.IO
+@using System.Security.Claims
+@using DJBrate.Application.Interfaces
+@using DJBrate.Domain.Entities
+@using DJBrate.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@inject IPlaylistService PlaylistService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject IWebHostEnvironment Env
+@inject PlaybackState Playback
+
+<PageTitle>Playlists - DJ Brate</PageTitle>
+
+<div class="page">
+    @if (Id is null)
+    {
+        <h1>Your playlists</h1>
+
+        @if (playlists is null)
+        {
+            <p class="muted">Loading...</p>
+        }
+        else if (playlists.Count == 0)
+        {
+            <p class="muted">No playlists yet. Generate one from the home page.</p>
+        }
+        else
+        {
+            <div class="playlist-grid">
+                @foreach (var p in playlists)
+                {
+                    <a class="playlist-card" href="@($"/playlists/{p.Id}")">
+                        @if (!string.IsNullOrEmpty(p.ImageUrl))
+                        {
+                            <img src="@p.ImageUrl" alt="" class="playlist-card-cover" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="playlist-card-cover playlist-card-cover-placeholder">&#9835;</div>
+                        }
+                        <div class="playlist-card-text">
+                            <div class="playlist-card-name">@p.Name</div>
+                            @if (!string.IsNullOrWhiteSpace(p.Description))
+                            {
+                                <div class="playlist-card-desc">@p.Description</div>
+                            }
+                            <div class="playlist-card-meta">
+                                <span>@p.TrackCount tracks</span>
+                                <span>@p.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                            </div>
+                        </div>
+                    </a>
+                }
+            </div>
+        }
+    }
+    else if (playlist is null)
+    {
+        <p class="muted">Loading playlist...</p>
+    }
+    else
+    {
+        <a class="back-link" href="/playlists">&larr; Back to playlists</a>
+
+        <div class="playlist-header">
+            <label class="playlist-cover @(uploadingCover ? "is-uploading" : "")">
+                @if (!string.IsNullOrEmpty(playlist.ImageUrl))
+                {
+                    <img src="@playlist.ImageUrl" alt="" class="playlist-cover-img" />
+                }
+                else
+                {
+                    <div class="playlist-cover-img playlist-cover-placeholder">&#9835;</div>
+                }
+                <div class="playlist-cover-overlay">
+                    @if (uploadingCover) { <span>Uploading...</span> } else { <span>Change cover</span> }
+                </div>
+                <InputFile OnChange="HandleCoverUpload" accept="image/*" class="playlist-cover-input" disabled="@uploadingCover" />
+            </label>
+            <div class="playlist-header-text">
+                <h1>@playlist.Name</h1>
+                @if (!string.IsNullOrWhiteSpace(playlist.Description))
+                {
+                    <p class="muted">@playlist.Description</p>
+                }
+                @if (coverError is not null)
+                {
+                    <p class="cover-error">@coverError</p>
+                }
+            </div>
+        </div>
+
+        <div class="track-list">
+            @foreach (var track in playlist.PlaylistTracks.OrderBy(t => t.Position))
+            {
+                <div class="track-item">
+                    <div class="track-row @(Playback.PlayingTrackId == track.SpotifyTrackId ? "is-playing-row" : "")"
+                         role="button"
+                         tabindex="0"
+                         aria-label="@(Playback.PlayingTrackId == track.SpotifyTrackId ? "Pause preview" : "Play preview")"
+                         @onclick="() => PlayTrack(track.SpotifyTrackId)">
+                        <span class="track-position">@track.Position</span>
+                        @if (!string.IsNullOrEmpty(track.AlbumImageUrl))
+                        {
+                            <img src="@track.AlbumImageUrl" alt="" class="track-art" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="track-art track-art-placeholder">&#9835;</div>
+                        }
+                        <div class="track-info">
+                            <div class="track-name">@track.TrackName</div>
+                            <div class="track-artist">@track.ArtistName</div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(playlist.SpotifyPlaylistId))
+        {
+            <a class="open-spotify"
+               href="@($"https://open.spotify.com/playlist/{playlist.SpotifyPlaylistId}")"
+               target="_blank">Open in Spotify</a>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    private List<Playlist>? playlists;
+    private Playlist? playlist;
+    private Guid? loadedId;
+    private Guid currentUserId;
+    private bool uploadingCover;
+    private string? coverError;
+
+    private const long MaxCoverBytes = 5 * 1024 * 1024;
+    private static readonly string[] AllowedCoverExtensions = [".jpg", ".jpeg", ".png", ".webp"];
+
+    protected override void OnInitialized()
+    {
+        Playback.OnChange += HandlePlaybackChange;
+    }
+
+    private void HandlePlaybackChange() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var idClaim = authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(idClaim, out var userId)) return;
+        currentUserId = userId;
+
+        if (Id is null)
+        {
+            playlists = (await PlaylistService.GetPlaylistsByUserIdAsync(userId)).ToList();
+            playlist = null;
+            loadedId = null;
+        }
+        else if (loadedId != Id)
+        {
+            playlist = await PlaylistService.GetPlaylistByIdAsync(Id.Value);
+            if (playlist is not null && playlist.UserId != userId) playlist = null;
+            loadedId = Id;
+            coverError = null;
+        }
+    }
+
+    private async Task PlayTrack(string trackId)
+    {
+        if (playlist is null) return;
+        await Playback.PlayAsync(playlist.PlaylistTracks, trackId, playlist.Id);
+    }
+
+    private async Task HandleCoverUpload(InputFileChangeEventArgs e)
+    {
+        if (playlist is null) return;
+
+        coverError = null;
+        var file = e.File;
+
+        if (file.Size > MaxCoverBytes)
+        {
+            coverError = "Image must be 5 MB or smaller.";
+            return;
+        }
+
+        var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+        if (!AllowedCoverExtensions.Contains(ext))
+        {
+            coverError = "Use JPG, PNG, or WebP.";
+            return;
+        }
+
+        uploadingCover = true;
+        StateHasChanged();
+
+        var uploadsDir = Path.Combine(Env.WebRootPath, "uploads", "playlist-covers");
+        Directory.CreateDirectory(uploadsDir);
+        var filename = $"{playlist.Id}{ext}";
+        var fullPath = Path.Combine(uploadsDir, filename);
+
+        foreach (var existing in Directory.EnumerateFiles(uploadsDir, $"{playlist.Id}.*"))
+        {
+            if (!string.Equals(existing, fullPath, StringComparison.OrdinalIgnoreCase))
+                File.Delete(existing);
+        }
+
+        await using (var stream = File.Create(fullPath))
+        await using (var source = file.OpenReadStream(MaxCoverBytes))
+        {
+            await source.CopyToAsync(stream);
+        }
+
+        var imageUrl = $"/uploads/playlist-covers/{filename}?v={DateTime.UtcNow.Ticks}";
+        var ok = await PlaylistService.UpdateCoverImageAsync(playlist.Id, currentUserId, imageUrl);
+        if (!ok)
+        {
+            coverError = "Could not save cover.";
+            uploadingCover = false;
+            return;
+        }
+        playlist.ImageUrl = imageUrl;
+
+        if (!string.IsNullOrEmpty(playlist.SpotifyPlaylistId))
+        {
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+            var syncTask = PlaylistService.SyncCoverToSpotifyAsync(playlist.Id, currentUserId, imageBytes);
+            await ((Task)syncTask).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            if (!syncTask.IsCompletedSuccessfully)
+                coverError = "Saved locally, but couldn't sync cover to Spotify.";
+        }
+
+        uploadingCover = false;
+    }
+
+    public void Dispose()
+    {
+        Playback.OnChange -= HandlePlaybackChange;
+    }
+}

@@ -7,5 +7,7 @@ public interface IAiClient
     Task<AiResponse> SendMessageAsync(
         string systemPrompt,
         List<AiMessage> conversationHistory,
-        List<AiToolDefinition> tools);
+        List<AiToolDefinition> tools,
+        float? temperature = null,
+        int? maxOutputTokens = null);
 }

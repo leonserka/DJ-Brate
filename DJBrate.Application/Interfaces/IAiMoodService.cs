@@ -5,7 +5,7 @@ namespace DJBrate.Application.Interfaces;
 
 public interface IAiMoodService
 {
-    Task<AiMoodResult> GeneratePlaylistAsync(MoodSession session, User user);
+    Task<AiMoodResult> GeneratePlaylistAsync(MoodSession session, User user, AiModelConfig config);
 }
 
 public class AiMoodResult

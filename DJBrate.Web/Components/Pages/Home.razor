@@ -1,27 +1,273 @@
 @page "/"
 @attribute [Authorize]
-@rendermode InteractiveServer
+@implements IDisposable
+@using System.Security.Claims
+@using DJBrate.Application.Interfaces
+@using DJBrate.Domain.Entities
+@using DJBrate.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IUserService UserService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject PlaybackState Playback
+@inject GenerationState Generation
 
 <PageTitle>DJ Brate</PageTitle>
 
-<div class="hero">
+<div class="hero @(Generation.Result is not null ? "hero-result" : "")">
     <div class="hero-content">
-        <p class="hero-eyebrow">AI Playlist Generator</p>
-        <h1>What's your mood?</h1>
-        <p>Opiši kako se osjećaš i DJ Brate će ti napraviti savršenu playlist.</p>
+        @if (Generation.Result is null)
+        {
+            <p class="hero-eyebrow">AI Playlist Generator</p>
+            <h1>What's your mood?</h1>
+            <p>Describe how you're feeling and DJ Brate will make you the perfect playlist.</p>
 
-        <div class="mood-input">
-            <textarea @bind="moodText" placeholder="npr. opušteno veče, malo melankolično ali ugodna vibracija..." rows="3"></textarea>
-            <button class="btn-primary" @onclick="Generate">Generiraj playlist</button>
-        </div>
+            <div class="mood-input">
+                <textarea @bind="moodText"
+                          @bind:event="oninput"
+                          placeholder="e.g. relaxed evening, a bit melancholic but a cozy vibe..."
+                          rows="3"
+                          disabled="@Generation.IsGenerating"></textarea>
+
+                <div class="name-fields">
+                    <input type="text"
+                           @bind="playlistName"
+                           @bind:event="oninput"
+                           placeholder="Playlist name (optional)"
+                           disabled="@Generation.IsGenerating" />
+                    <input type="text"
+                           @bind="playlistDescription"
+                           @bind:event="oninput"
+                           placeholder="Description (optional)"
+                           disabled="@Generation.IsGenerating" />
+                </div>
+
+                <div class="chip-section">
+                    <p class="chip-label">Mood</p>
+                    <div class="mood-chips">
+                        @foreach (var mood in MoodChips)
+                        {
+                            <button type="button"
+                                    class="mood-chip @(selectedMood == mood ? "selected" : "")"
+                                    @onclick="() => ToggleMood(mood)"
+                                    disabled="@Generation.IsGenerating">
+                                @mood
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="chip-section">
+                    <p class="chip-label">Genres <span class="chip-label-hint">optional</span></p>
+                    <div class="mood-chips">
+                        @foreach (var genre in GenreChips)
+                        {
+                            <button type="button"
+                                    class="mood-chip @(selectedGenres.Contains(genre) ? "selected" : "")"
+                                    @onclick="() => ToggleGenre(genre)"
+                                    disabled="@Generation.IsGenerating">
+                                @genre
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="sliders">
+                    <div class="slider-row">
+                        <label>Energy <span class="slider-val">@energy.ToString("F1")</span></label>
+                        <input type="range" min="0" max="1" step="0.1" @bind="energy" disabled="@Generation.IsGenerating" />
+                    </div>
+                    <div class="slider-row">
+                        <label>Danceability <span class="slider-val">@danceability.ToString("F1")</span></label>
+                        <input type="range" min="0" max="1" step="0.1" @bind="danceability" disabled="@Generation.IsGenerating" />
+                    </div>
+                </div>
+
+                <button class="btn-primary" @onclick="Generate" disabled="@(!CanGenerate)">
+                    @(Generation.IsGenerating ? "Generating..." : "Generate playlist")
+                </button>
+
+                @if (Generation.IsGenerating)
+                {
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p class="loading-text">Generating your playlist...</p>
+                    </div>
+                }
+
+                @if (Generation.ErrorMessage is not null)
+                {
+                    <div class="error-box">
+                        <p class="error-title">Something went wrong</p>
+                        <p class="error-detail">@Generation.ErrorMessage</p>
+                        <button class="btn-ghost" @onclick="Reset">Try again</button>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="hero-eyebrow">Playlist Ready</p>
+            <h1>@Generation.Result!.Playlist.Name</h1>
+            <p>@Generation.Result!.Playlist.Description</p>
+
+            <div class="insights-card">
+                <div class="insights-header">
+                    <span class="mood-pill">@Generation.Result!.Insights.DetectedMood</span>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(Generation.Result!.Insights.AiReasoning))
+                {
+                    <p class="insights-reasoning">"@Generation.Result!.Insights.AiReasoning"</p>
+                }
+
+                <div class="feature-bars">
+                    @foreach (var feature in BuildFeatureBars(Generation.Result!.Insights.AudioFeatures))
+                    {
+                        <div class="feature-row">
+                            <span class="feature-label">@feature.Label</span>
+                            <div class="feature-track">
+                                <div class="feature-fill" style="width:@(feature.Percent)%"></div>
+                            </div>
+                            <span class="feature-val">@feature.Display</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="track-list">
+                @foreach (var track in Generation.Result!.Playlist.PlaylistTracks.OrderBy(t => t.Position))
+                {
+                    <div class="track-item">
+                        <div class="track-row @(Playback.PlayingTrackId == track.SpotifyTrackId ? "is-playing-row" : "")"
+                             role="button"
+                             tabindex="0"
+                             aria-label="@(Playback.PlayingTrackId == track.SpotifyTrackId ? "Pause preview" : "Play preview")"
+                             @onclick="() => PlayTrack(track.SpotifyTrackId)">
+                            <span class="track-position">@track.Position</span>
+                            @if (!string.IsNullOrEmpty(track.AlbumImageUrl))
+                            {
+                                <img src="@track.AlbumImageUrl" alt="" class="track-art" loading="lazy" />
+                            }
+                            else
+                            {
+                                <div class="track-art track-art-placeholder">&#9835;</div>
+                            }
+                            <div class="track-info">
+                                <div class="track-name">@track.TrackName</div>
+                                <div class="track-artist">@track.ArtistName</div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="result-actions">
+                @if (!string.IsNullOrEmpty(Generation.Result!.Playlist.SpotifyPlaylistId))
+                {
+                    <a class="btn-primary"
+                       href="@($"https://open.spotify.com/playlist/{Generation.Result!.Playlist.SpotifyPlaylistId}")"
+                       target="_blank">Open in Spotify</a>
+                }
+                <button class="btn-ghost" @onclick="Reset">Generate another</button>
+            </div>
+        }
     </div>
 </div>
 
 @code {
-    private string moodText = "";
+    private static readonly string[] MoodChips =
+        ["happy", "chill", "sad", "energetic", "focused", "romantic", "angry", "nostalgic"];
 
-    private void Generate()
+    private static readonly string[] GenreChips =
+        ["pop", "rock", "indie", "hip-hop", "electronic", "jazz", "r-n-b", "metal", "classical", "latin"];
+
+    private string moodText = "";
+    private string playlistName = "";
+    private string playlistDescription = "";
+    private string? selectedMood;
+    private readonly HashSet<string> selectedGenres = new();
+    private float energy = 0.5f;
+    private float danceability = 0.5f;
+
+    private bool CanGenerate =>
+        !Generation.IsGenerating &&
+        (!string.IsNullOrWhiteSpace(moodText) || !string.IsNullOrEmpty(selectedMood));
+
+    protected override void OnInitialized()
     {
-        // TODO: call mood service
+        Playback.OnChange += HandleStateChange;
+        Generation.OnChange += HandleStateChange;
+    }
+
+    private void HandleStateChange() => InvokeAsync(StateHasChanged);
+
+    private void ToggleMood(string mood)
+    {
+        selectedMood = selectedMood == mood ? null : mood;
+    }
+
+    private void ToggleGenre(string genre)
+    {
+        if (!selectedGenres.Add(genre))
+            selectedGenres.Remove(genre);
+    }
+
+    private async Task PlayTrack(string trackId)
+    {
+        if (Generation.Result is null) return;
+        await Playback.PlayAsync(Generation.Result.Playlist.PlaylistTracks, trackId, Generation.Result.Playlist.Id);
+    }
+
+    private async Task Generate()
+    {
+        if (!CanGenerate) return;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var idClaim = authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(idClaim, out var userId)) return;
+
+        var user = await UserService.GetUserByIdAsync(userId);
+        if (user is null) return;
+
+        await Generation.GenerateAsync(
+            user,
+            string.IsNullOrWhiteSpace(moodText) ? null : moodText,
+            selectedMood,
+            selectedGenres.Count > 0 ? selectedGenres.ToArray() : null,
+            energy,
+            danceability,
+            string.IsNullOrWhiteSpace(playlistName) ? null : playlistName,
+            string.IsNullOrWhiteSpace(playlistDescription) ? null : playlistDescription);
+    }
+
+    private void Reset()
+    {
+        Generation.Reset();
+        moodText = "";
+        playlistName = "";
+        playlistDescription = "";
+        selectedMood = null;
+        selectedGenres.Clear();
+        energy = 0.5f;
+        danceability = 0.5f;
+    }
+
+    public void Dispose()
+    {
+        Playback.OnChange -= HandleStateChange;
+        Generation.OnChange -= HandleStateChange;
+    }
+
+    private record FeatureBar(string Label, float Percent, string Display);
+
+    private static List<FeatureBar> BuildFeatureBars(DJBrate.Application.Models.Spotify.AudioFeatureTargets f)
+    {
+        var bars = new List<FeatureBar>();
+        if (f.Valence.HasValue)      bars.Add(new("Valence",      f.Valence.Value      * 100, f.Valence.Value.ToString("F2")));
+        if (f.Energy.HasValue)       bars.Add(new("Energy",       f.Energy.Value       * 100, f.Energy.Value.ToString("F2")));
+        if (f.Danceability.HasValue) bars.Add(new("Danceability", f.Danceability.Value * 100, f.Danceability.Value.ToString("F2")));
+        if (f.Acousticness.HasValue) bars.Add(new("Acousticness", f.Acousticness.Value * 100, f.Acousticness.Value.ToString("F2")));
+        if (f.Tempo.HasValue)        bars.Add(new("Tempo",        Math.Clamp((f.Tempo.Value - 60) / 1.2f, 0, 100), $"{f.Tempo.Value:F0} BPM"));
+        return bars;
     }
 }

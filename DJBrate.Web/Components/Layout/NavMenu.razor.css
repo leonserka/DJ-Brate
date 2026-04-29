@@ -68,6 +68,23 @@
     text-align: center;
 }
 
+.nav-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background-color 0.15s;
+}
+
+.nav-links li ::deep a:hover .nav-dot {
+    background: rgba(29, 185, 84, 0.5);
+}
+
+.nav-links li ::deep a.active .nav-dot {
+    background: #1db954;
+}
+
 .sidebar-footer {
     margin-top: auto;
     padding-top: 1rem;

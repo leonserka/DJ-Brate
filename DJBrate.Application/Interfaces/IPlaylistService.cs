@@ -7,4 +7,6 @@ public interface IPlaylistService
     Task<Playlist?> GetPlaylistByIdAsync(Guid id);
     Task<IEnumerable<Playlist>> GetPlaylistsByUserIdAsync(Guid userId);
     Task<Playlist> CreatePlaylistAsync(Playlist playlist);
+    Task<bool> UpdateCoverImageAsync(Guid playlistId, Guid userId, string imageUrl);
+    Task SyncCoverToSpotifyAsync(Guid playlistId, Guid userId, byte[] imageBytes);
 }

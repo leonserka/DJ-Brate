@@ -5,4 +5,5 @@ namespace DJBrate.Domain.Interfaces;
 public interface IPlaylistRepository : IRepository<Playlist>
 {
     Task<IEnumerable<Playlist>> GetByUserIdAsync(Guid userId);
+    Task<Playlist?> GetByIdWithTracksAsync(Guid id);
 }

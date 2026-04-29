@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DJBrate.Application.Interfaces;
 using DJBrate.Application.Mcp;
 using DJBrate.Application.Models.Ai;
@@ -12,23 +13,26 @@ public class AiMoodService : IAiMoodService
 {
     private const int MaxToolCallRounds = 5;
 
+    private static readonly Regex RequestedTrackPattern = new(
+        @"(?:must\s+(?:include|have))\s+(.+?)(?:\s+by\s+(.+?))?(?:\s*[,;.]|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private const string DefaultSystemPrompt = """
-        You are DJ Brate, an AI DJ that creates personalized Spotify playlists based on the user's mood.
+        You are DJ Brate, an AI DJ that creates personalized Spotify playlists based on the user's prompt and mood.
 
         Your job:
-        1. Read the user's mood prompt carefully
-        2. Use the available tools to understand their music taste (call get_user_top_tracks and/or get_user_top_artists)
-        3. Based on their taste + mood, call get_recommendations with appropriate seed artists/tracks and audio feature targets
-        4. After getting recommendations, respond with a final JSON result
+        1. Read the user's prompt and mood tags carefully. The prompt is the most important signal — it drives everything about the playlist's composition, specificity, and vibe.
+        2. Decide whether you need the user's listening history. By default, DO NOT call any tools - just generate the playlist from the prompt. Only call get_user_top_tracks or get_user_top_artists if the user explicitly asks for a playlist based on their history, asks for songs similar to what they already listen to, or asks for a personalized mix rooted in their taste.
+        3. Produce a final JSON response with 30-35 concrete track suggestions (artist + title).
 
-        Audio feature guidelines:
+        Audio feature guidelines (you estimate these as descriptive targets, not Spotify-queried):
         - valence: 0.0 = sad/angry, 1.0 = happy/cheerful
         - energy: 0.0 = calm/relaxed, 1.0 = intense/energetic
         - tempo: 60-80 = slow, 100-120 = moderate, 130-160 = fast
         - danceability: 0.0 = not danceable, 1.0 = very danceable
         - acousticness: 0.0 = electronic/produced, 1.0 = acoustic/unplugged
 
-        When you have the final track list, respond with ONLY this JSON (no markdown, no extra text):
+        Respond with ONLY this JSON (no markdown, no extra text):
         {
             "playlist_name": "a creative playlist name based on the mood",
             "playlist_description": "a short description of the playlist vibe",
@@ -40,36 +44,88 @@ public class AiMoodService : IAiMoodService
                 "tempo": 60-180,
                 "danceability": 0.0-1.0,
                 "acousticness": 0.0-1.0
-            }
+            },
+            "tracks": [
+                { "artist": "Artist Name", "title": "Track Title" },
+                { "artist": "Artist Name", "title": "Track Title" }
+            ]
         }
 
-        Important: You MUST call at least get_user_top_artists or get_user_top_tracks first to understand the user's taste, then call get_recommendations. Do not skip tool calls.
+        Rules for the tracks array:
+        - Suggest real songs you are confident exist on Spotify.
+        - Do NOT default to only the most famous songs in a genre. Mix obvious anthems with deeper cuts, album tracks, B-sides, and lesser-known releases from respected artists in the scene. Aim for a playlist a real fan would be impressed by — not a "top 10 most streamed" list.
+        - The user's prompt drives composition. If they ask for specific artists, eras, sub-genres, or a particular vibe, honor that over any default instinct toward greatest-hits picks. If they explicitly ask for "classics", "greatest hits", or "most popular", then lean toward the obvious picks.
+        - Span multiple eras and sub-styles when it fits the request. Introduce the listener to tracks they might not already know.
+        - Artist name must be the primary artist only, no "feat." additions.
+        - Title must be the base track title, no remix/live/acoustic qualifiers unless essential to the request.
+        - Aim for 30-35 tracks so a few search misses still leave a full playlist.
         """;
 
     private readonly IAiClient _aiClient;
     private readonly McpDispatcher _mcpDispatcher;
     private readonly IAiConversationMessageRepository _messageRepo;
     private readonly IAiMoodMappingRepository _moodMappingRepo;
-    private readonly IAiModelConfigRepository _configRepo;
+    private readonly ISpotifyApiClient _spotifyClient;
+    private readonly ISpotifyTokenService _tokenService;
 
     public AiMoodService(
         IAiClient aiClient,
         McpDispatcher mcpDispatcher,
         IAiConversationMessageRepository messageRepo,
         IAiMoodMappingRepository moodMappingRepo,
-        IAiModelConfigRepository configRepo)
+        ISpotifyApiClient spotifyClient,
+        ISpotifyTokenService tokenService)
     {
         _aiClient        = aiClient;
         _mcpDispatcher   = mcpDispatcher;
         _messageRepo     = messageRepo;
         _moodMappingRepo = moodMappingRepo;
-        _configRepo      = configRepo;
+        _spotifyClient   = spotifyClient;
+        _tokenService    = tokenService;
     }
 
-    public async Task<AiMoodResult> GeneratePlaylistAsync(MoodSession session, User user)
+    public async Task<AiMoodResult> GeneratePlaylistAsync(MoodSession session, User user, AiModelConfig config)
     {
-        var config = await _configRepo.GetActiveConfigAsync();
-        var systemPrompt = config?.SystemPrompt ?? DefaultSystemPrompt;
+        var systemPrompt = string.IsNullOrWhiteSpace(config.SystemPrompt)
+            ? DefaultSystemPrompt
+            : config.SystemPrompt;
+
+        var requestedTracks = ExtractRequestedTracks(session.PromptText);
+        var preSearched = new List<SpotifyTrack>();
+        if (requestedTracks.Count > 0)
+        {
+            var accessToken = await _tokenService.EnsureValidTokenAsync(user);
+            foreach (var (title, artist) in requestedTracks)
+            {
+                var match = await _spotifyClient.SearchTrackAsync(accessToken, artist ?? "", title);
+                if (match is not null)
+                    preSearched.Add(match);
+            }
+
+            if (preSearched.Count > 0)
+            {
+                var trackLines = new List<string>();
+                foreach (var t in preSearched)
+                {
+                    var artistRef = t.Artists.FirstOrDefault();
+                    var line = $"- \"{t.Name}\" by {artistRef?.Name ?? "Unknown"}";
+                    if (artistRef is not null)
+                    {
+                        var fullArtist = await _spotifyClient.GetArtistAsync(accessToken, artistRef.Id);
+                        if (fullArtist?.Genres.Count > 0)
+                            line += $" (genres: {string.Join(", ", fullArtist.Genres)})";
+                    }
+                    trackLines.Add(line);
+                }
+                var trackInfo = string.Join("\n", trackLines);
+                systemPrompt += $"""
+
+                IMPORTANT: The user specifically requested these tracks. They have been verified on Spotify and will be force-included in the playlist:
+                {trackInfo}
+                Generate the rest of the playlist to complement these tracks — match their style, energy, and sub-genre closely. Use the genre tags above to guide your picks. Do NOT include these exact tracks in your tracks array, they are already added separately.
+                """;
+            }
+        }
 
         var tools = McpToolDefinitions.GetAllTools();
         var conversation = new List<AiMessage>();
@@ -79,11 +135,10 @@ public class AiMoodService : IAiMoodService
         conversation.Add(new AiMessage { Role = "user", Text = userPrompt });
         await SaveMessage(session.Id, "user", userPrompt, sequenceOrder++);
 
-        var lastRecommendationResult = "";
-
         for (var round = 0; round < MaxToolCallRounds; round++)
         {
-            var response = await _aiClient.SendMessageAsync(systemPrompt, conversation, tools);
+            var response = await _aiClient.SendMessageAsync(
+                systemPrompt, conversation, tools, config.Temperature, config.MaxTokens);
 
             if (response.HasToolCalls)
             {
@@ -94,9 +149,6 @@ public class AiMoodService : IAiMoodService
 
                     var result = await _mcpDispatcher.ExecuteToolAsync(
                         session.Id, user, toolCall.Name, toolCall.Arguments);
-
-                    if (toolCall.Name == McpToolDefinitions.ToolNames.GetRecommendations)
-                        lastRecommendationResult = result;
 
                     conversation.Add(new AiMessage
                     {
@@ -112,12 +164,37 @@ public class AiMoodService : IAiMoodService
             }
             else if (response.Text is not null)
             {
-                await SaveMessage(session.Id, "assistant", response.Text, sequenceOrder);
-                return await ParseFinalResponse(session.Id, response.Text, lastRecommendationResult);
+                await SaveMessage(session.Id, "assistant", response.Text, sequenceOrder++);
+
+                var parseCheck = Task.Run(() => JsonDocument.Parse(ExtractJson(response.Text)));
+                await ((Task)parseCheck).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+                if (!parseCheck.IsCompletedSuccessfully)
+                {
+                    const string nudge =
+                        "Your previous response was not valid JSON. Respond again with ONLY the JSON object specified in the system prompt — no markdown fences, no commentary, no trailing text. Make sure all strings use double quotes and there are no trailing commas.";
+                    conversation.Add(new AiMessage { Role = "assistant", Text = response.Text });
+                    conversation.Add(new AiMessage { Role = "user", Text = nudge });
+                    await SaveMessage(session.Id, "user", nudge, sequenceOrder++);
+                    continue;
+                }
+
+                parseCheck.Result.Dispose();
+
+                var aiResult = await ParseFinalResponse(session.Id, user, response.Text);
+
+                if (preSearched.Count > 0)
+                {
+                    var existingIds = new HashSet<string>(aiResult.RecommendedTracks.Select(t => t.Id));
+                    var unique = preSearched.Where(t => !existingIds.Contains(t.Id)).ToList();
+                    aiResult.RecommendedTracks.InsertRange(0, unique);
+                }
+
+                return aiResult;
             }
         }
 
-        throw new InvalidOperationException("AI did not produce a final response within the allowed tool call rounds.");
+        throw new InvalidOperationException("AI did not produce a valid JSON response within the allowed rounds.");
     }
 
     private static string BuildUserPrompt(MoodSession session)
@@ -144,8 +221,25 @@ public class AiMoodService : IAiMoodService
             : "Surprise me with a good playlist based on my listening history.";
     }
 
-    private async Task<AiMoodResult> ParseFinalResponse(
-        Guid sessionId, string aiText, string lastRecommendationResult)
+    private static List<(string Title, string? Artist)> ExtractRequestedTracks(string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+            return [];
+
+        var results = new List<(string Title, string? Artist)>();
+        foreach (Match match in RequestedTrackPattern.Matches(prompt))
+        {
+            var title = match.Groups[1].Value.Trim().Trim('\'', '"');
+            var artist = match.Groups[2].Success
+                ? match.Groups[2].Value.Trim().Trim('\'', '"')
+                : null;
+            if (!string.IsNullOrWhiteSpace(title))
+                results.Add((title, artist));
+        }
+        return results;
+    }
+
+    private async Task<AiMoodResult> ParseFinalResponse(Guid sessionId, User user, string aiText)
     {
         var json = ExtractJson(aiText);
         var doc = JsonDocument.Parse(json);
@@ -176,15 +270,11 @@ public class AiMoodService : IAiMoodService
             TargetTempo       = audioFeatures.Tempo,
             TargetDanceability = audioFeatures.Danceability,
             TargetAcousticness = audioFeatures.Acousticness,
-            FlowUsed          = "mcp_tool_calling",
+            FlowUsed          = "ai_direct_tracks",
             AiReasoning       = reasoning
         });
 
-        var tracks = new List<SpotifyTrack>();
-        if (!string.IsNullOrEmpty(lastRecommendationResult))
-        {
-            tracks = ParseRecommendedTracks(lastRecommendationResult);
-        }
+        var tracks = await ResolveTracksAsync(user, root);
 
         return new AiMoodResult
         {
@@ -197,33 +287,28 @@ public class AiMoodService : IAiMoodService
         };
     }
 
-    private static List<SpotifyTrack> ParseRecommendedTracks(string json)
+    private async Task<List<SpotifyTrack>> ResolveTracksAsync(User user, JsonElement root)
     {
-        var doc = JsonDocument.Parse(json);
-        var tracks = new List<SpotifyTrack>();
+        if (!root.TryGetProperty("tracks", out var tracksElement) || tracksElement.ValueKind != JsonValueKind.Array)
+            return [];
 
-        foreach (var item in doc.RootElement.EnumerateArray())
+        var accessToken = await _tokenService.EnsureValidTokenAsync(user);
+        var resolved = new List<SpotifyTrack>();
+        var seenIds = new HashSet<string>();
+
+        foreach (var item in tracksElement.EnumerateArray())
         {
-            tracks.Add(new SpotifyTrack
-            {
-                Id         = item.GetProperty("spotify_id").GetString()!,
-                Name       = item.GetProperty("name").GetString()!,
-                Uri        = item.GetProperty("uri").GetString()!,
-                DurationMs = item.TryGetProperty("duration_ms", out var dur) ? dur.GetInt32() : 0,
-                PreviewUrl = item.TryGetProperty("preview_url", out var pv) ? pv.GetString() : null,
-                Artists    = [new SpotifyArtistRef
-                {
-                    Id   = "",
-                    Name = item.TryGetProperty("artist", out var art) ? art.GetString()! : "Unknown"
-                }],
-                Album = new SpotifyAlbum
-                {
-                    Name = item.TryGetProperty("album", out var alb) ? alb.GetString()! : ""
-                }
-            });
+            var artist = item.TryGetProperty("artist", out var a) ? a.GetString() : null;
+            var title  = item.TryGetProperty("title",  out var t) ? t.GetString() : null;
+            if (string.IsNullOrWhiteSpace(artist) || string.IsNullOrWhiteSpace(title))
+                continue;
+
+            var match = await _spotifyClient.SearchTrackAsync(accessToken, artist, title);
+            if (match is not null && seenIds.Add(match.Id))
+                resolved.Add(match);
         }
 
-        return tracks;
+        return resolved;
     }
 
     private static string ExtractJson(string text)

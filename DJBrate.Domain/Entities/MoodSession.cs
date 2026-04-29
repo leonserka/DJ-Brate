@@ -35,7 +35,7 @@ public class MoodSession
 
     [Required]
     [Column("status")]
-    public string Status { get; set; } = "creating";
+    public string Status { get; set; } = MoodSessionStatuses.Creating;
 
     [Required]
     [Column("created_at")]

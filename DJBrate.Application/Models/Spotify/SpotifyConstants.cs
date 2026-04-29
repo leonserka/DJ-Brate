@@ -8,14 +8,14 @@ public static class SpotifyConstants
 
     public const string Scopes =
         "user-read-private user-read-email user-top-read " +
-        "playlist-modify-public playlist-modify-private";
+        "playlist-modify-public playlist-modify-private " +
+        "ugc-image-upload";
 
-    public const string OAuthStateCookie = "spotify_oauth_state";
     public const string DefaultUserRole  = "user";
     public const string PlaceholderEmailSuffix = "@spotify.placeholder";
 
-    public const int TokenRefreshBufferMinutes     = 5;
-    public const int OAuthStateCookieMaxAgeMinutes = 10;
-    public const int SyncIntervalHours             = 24;
-    public const int CookieExpiryDays              = 7;
+    public const int TokenRefreshBufferMinutes = 5;
+    public const int OAuthStateTtlMinutes      = 10;
+    public const int SyncIntervalHours         = 24;
+    public const int CookieExpiryDays          = 7;
 }

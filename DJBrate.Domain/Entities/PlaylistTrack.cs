@@ -33,6 +33,9 @@ public class PlaylistTrack
     [Column("album_name")]
     public string? AlbumName { get; set; }
 
+    [Column("album_image_url")]
+    public string? AlbumImageUrl { get; set; }
+
     [Column("duration_ms")]
     public int? DurationMs { get; set; }
 

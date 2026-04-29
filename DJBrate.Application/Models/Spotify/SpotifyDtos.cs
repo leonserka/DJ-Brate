@@ -72,6 +72,9 @@ public class SpotifyAlbum
 {
     [JsonPropertyName("name")]
     public string Name { get; set; } = null!;
+
+    [JsonPropertyName("images")]
+    public List<SpotifyImage> Images { get; set; } = [];
 }
 
 public class SpotifyArtist
