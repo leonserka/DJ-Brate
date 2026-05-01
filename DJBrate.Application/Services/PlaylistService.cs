@@ -17,17 +17,20 @@ public class PlaylistService : IPlaylistService
     private readonly IUserRepository _userRepository;
     private readonly ISpotifyTokenService _tokenService;
     private readonly ISpotifyApiClient _spotifyClient;
+    private readonly IAiConversationMessageRepository _conversationRepository;
 
     public PlaylistService(
         IPlaylistRepository playlistRepository,
         IUserRepository userRepository,
         ISpotifyTokenService tokenService,
-        ISpotifyApiClient spotifyClient)
+        ISpotifyApiClient spotifyClient,
+        IAiConversationMessageRepository conversationRepository)
     {
-        _playlistRepository = playlistRepository;
-        _userRepository     = userRepository;
-        _tokenService       = tokenService;
-        _spotifyClient      = spotifyClient;
+        _playlistRepository     = playlistRepository;
+        _userRepository         = userRepository;
+        _tokenService           = tokenService;
+        _spotifyClient          = spotifyClient;
+        _conversationRepository = conversationRepository;
     }
 
     public async Task<Playlist?> GetPlaylistByIdAsync(Guid id)
@@ -65,6 +68,14 @@ public class PlaylistService : IPlaylistService
 
         var token = await _tokenService.EnsureValidTokenAsync(user);
         await _spotifyClient.UploadPlaylistCoverAsync(token, playlist.SpotifyPlaylistId, jpegBase64);
+    }
+
+    public async Task<List<AiConversationMessage>> GetConversationAsync(Guid playlistId, Guid userId)
+    {
+        var playlist = await _playlistRepository.GetByIdAsync(playlistId);
+        if (playlist is null || playlist.UserId != userId) return [];
+        if (playlist.SessionId == Guid.Empty) return [];
+        return await _conversationRepository.GetBySessionIdAsync(playlist.SessionId);
     }
 
     private static string? ReencodeToJpegBase64(byte[] bytes)

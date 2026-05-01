@@ -1,5 +1,5 @@
 .page {
-    max-width: 720px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 2rem 1rem 7rem;
     color: #e0e0e0;
@@ -286,4 +286,57 @@
 
 .open-spotify:hover {
     background: #1ed760;
+}
+
+.detail-body {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 1.5rem;
+    align-items: start;
+    margin-top: 0.5rem;
+}
+
+.detail-tracks {
+    min-width: 0;
+}
+
+.conversation {
+    position: sticky;
+    top: 1.5rem;
+    background: #141414;
+    border: 1px solid #1f1f1f;
+    border-radius: 12px;
+    padding: 1.25rem;
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.conversation h2 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #1f1f1f;
+    flex-shrink: 0;
+}
+
+.conversation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+@media (max-width: 860px) {
+    .detail-body {
+        grid-template-columns: 1fr;
+    }
+
+    .conversation {
+        position: static;
+        max-height: none;
+    }
 }

@@ -96,39 +96,63 @@
             </div>
         </div>
 
-        <div class="track-list">
-            @foreach (var track in playlist.PlaylistTracks.OrderBy(t => t.Position))
-            {
-                <div class="track-item">
-                    <div class="track-row @(Playback.PlayingTrackId == track.SpotifyTrackId ? "is-playing-row" : "")"
-                         role="button"
-                         tabindex="0"
-                         aria-label="@(Playback.PlayingTrackId == track.SpotifyTrackId ? "Pause preview" : "Play preview")"
-                         @onclick="() => PlayTrack(track.SpotifyTrackId)">
-                        <span class="track-position">@track.Position</span>
-                        @if (!string.IsNullOrEmpty(track.AlbumImageUrl))
-                        {
-                            <img src="@track.AlbumImageUrl" alt="" class="track-art" loading="lazy" />
-                        }
-                        else
-                        {
-                            <div class="track-art track-art-placeholder">&#9835;</div>
-                        }
-                        <div class="track-info">
-                            <div class="track-name">@track.TrackName</div>
-                            <div class="track-artist">@track.ArtistName</div>
+        <div class="detail-body">
+            <div class="detail-tracks">
+                <div class="track-list">
+                    @foreach (var track in playlist.PlaylistTracks.OrderBy(t => t.Position))
+                    {
+                        <div class="track-item">
+                            <div class="track-row @(Playback.PlayingTrackId == track.SpotifyTrackId ? "is-playing-row" : "")"
+                                 role="button"
+                                 tabindex="0"
+                                 aria-label="@(Playback.PlayingTrackId == track.SpotifyTrackId ? "Pause preview" : "Play preview")"
+                                 @onclick="() => PlayTrack(track.SpotifyTrackId)">
+                                <span class="track-position">@track.Position</span>
+                                @if (!string.IsNullOrEmpty(track.AlbumImageUrl))
+                                {
+                                    <img src="@track.AlbumImageUrl" alt="" class="track-art" loading="lazy" />
+                                }
+                                else
+                                {
+                                    <div class="track-art track-art-placeholder">&#9835;</div>
+                                }
+                                <div class="track-info">
+                                    <div class="track-name">@track.TrackName</div>
+                                    <div class="track-artist">@track.ArtistName</div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    }
                 </div>
-            }
-        </div>
 
-        @if (!string.IsNullOrEmpty(playlist.SpotifyPlaylistId))
-        {
-            <a class="open-spotify"
-               href="@($"https://open.spotify.com/playlist/{playlist.SpotifyPlaylistId}")"
-               target="_blank">Open in Spotify</a>
-        }
+                @if (!string.IsNullOrEmpty(playlist.SpotifyPlaylistId))
+                {
+                    <a class="open-spotify"
+                       href="@($"https://open.spotify.com/playlist/{playlist.SpotifyPlaylistId}")"
+                       target="_blank">Open in Spotify</a>
+                }
+            </div>
+
+            <aside class="conversation">
+                <h2>How DJ Brate built this</h2>
+                @if (conversation.Count == 0)
+                {
+                    <p class="muted">No conversation recorded.</p>
+                }
+                else
+                {
+                    <div class="conversation-list">
+                        @foreach (var msg in conversation)
+                        {
+                            @if (msg.Role != AiMessageRoles.Function)
+                            {
+                                <ConversationBubble Message="msg" />
+                            }
+                        }
+                    </div>
+                }
+            </aside>
+        </div>
     }
 </div>
 
@@ -137,6 +161,7 @@
 
     private List<Playlist>? playlists;
     private Playlist? playlist;
+    private List<AiConversationMessage> conversation = [];
     private Guid? loadedId;
     private Guid currentUserId;
     private bool uploadingCover;
@@ -163,12 +188,16 @@
         {
             playlists = (await PlaylistService.GetPlaylistsByUserIdAsync(userId)).ToList();
             playlist = null;
+            conversation = [];
             loadedId = null;
         }
         else if (loadedId != Id)
         {
             playlist = await PlaylistService.GetPlaylistByIdAsync(Id.Value);
             if (playlist is not null && playlist.UserId != userId) playlist = null;
+            conversation = playlist is not null
+                ? await PlaylistService.GetConversationAsync(Id.Value, userId)
+                : [];
             loadedId = Id;
             coverError = null;
         }

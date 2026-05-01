@@ -132,8 +132,8 @@ public class AiMoodService : IAiMoodService
         var sequenceOrder = 0;
 
         var userPrompt = BuildUserPrompt(session);
-        conversation.Add(new AiMessage { Role = "user", Text = userPrompt });
-        await SaveMessage(session.Id, "user", userPrompt, sequenceOrder++);
+        conversation.Add(new AiMessage { Role = AiMessageRoles.User, Text = userPrompt });
+        await SaveMessage(session.Id, AiMessageRoles.User, userPrompt, sequenceOrder++);
 
         for (var round = 0; round < MaxToolCallRounds; round++)
         {
@@ -144,27 +144,27 @@ public class AiMoodService : IAiMoodService
             {
                 foreach (var toolCall in response.ToolCalls)
                 {
-                    conversation.Add(new AiMessage { Role = "assistant", ToolCall = toolCall });
-                    await SaveMessage(session.Id, "assistant", $"[tool_call: {toolCall.Name}]", sequenceOrder++);
+                    conversation.Add(new AiMessage { Role = AiMessageRoles.Assistant, ToolCall = toolCall });
+                    await SaveMessage(session.Id, AiMessageRoles.Assistant, $"[tool_call: {toolCall.Name}]", sequenceOrder++);
 
                     var result = await _mcpDispatcher.ExecuteToolAsync(
                         session.Id, user, toolCall.Name, toolCall.Arguments);
 
                     conversation.Add(new AiMessage
                     {
-                        Role = "function",
+                        Role = AiMessageRoles.Function,
                         ToolResult = new AiToolResult
                         {
                             ToolCallId = toolCall.Name,
                             Result     = result
                         }
                     });
-                    await SaveMessage(session.Id, "function", result, sequenceOrder++);
+                    await SaveMessage(session.Id, AiMessageRoles.Function, result, sequenceOrder++);
                 }
             }
             else if (response.Text is not null)
             {
-                await SaveMessage(session.Id, "assistant", response.Text, sequenceOrder++);
+                await SaveMessage(session.Id, AiMessageRoles.Assistant, response.Text, sequenceOrder++);
 
                 var parseCheck = Task.Run(() => JsonDocument.Parse(ExtractJson(response.Text)));
                 await ((Task)parseCheck).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
@@ -173,9 +173,9 @@ public class AiMoodService : IAiMoodService
                 {
                     const string nudge =
                         "Your previous response was not valid JSON. Respond again with ONLY the JSON object specified in the system prompt — no markdown fences, no commentary, no trailing text. Make sure all strings use double quotes and there are no trailing commas.";
-                    conversation.Add(new AiMessage { Role = "assistant", Text = response.Text });
-                    conversation.Add(new AiMessage { Role = "user", Text = nudge });
-                    await SaveMessage(session.Id, "user", nudge, sequenceOrder++);
+                    conversation.Add(new AiMessage { Role = AiMessageRoles.Assistant, Text = response.Text });
+                    conversation.Add(new AiMessage { Role = AiMessageRoles.User, Text = nudge });
+                    await SaveMessage(session.Id, AiMessageRoles.User, nudge, sequenceOrder++);
                     continue;
                 }
 

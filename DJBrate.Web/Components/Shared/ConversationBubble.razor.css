@@ -1,0 +1,88 @@
+.bubble {
+    max-width: 82%;
+    padding: 0.7rem 0.95rem;
+    border-radius: 12px;
+    border: 1px solid #1f1f1f;
+    font-size: 0.875rem;
+    line-height: 1.55;
+}
+
+.bubble-user {
+    align-self: flex-end;
+    background: #141414;
+    border-color: #2a2a2a;
+    text-align: left;
+}
+
+.bubble-tags {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-top: 0.6rem;
+}
+
+.bubble-tag {
+    background: #1f1f1f;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.72rem;
+    color: #888;
+    font-variant-numeric: tabular-nums;
+    font-family: 'Inter', monospace;
+    white-space: nowrap;
+}
+
+.bubble-assistant {
+    align-self: flex-start;
+    background: #181818;
+}
+
+.bubble-text {
+    color: #e0e0e0;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.bubble-tool-call {
+    align-self: center;
+    color: #555;
+    font-size: 0.78rem;
+    font-style: italic;
+    padding: 0.25rem 0;
+}
+
+.bubble-details {
+    margin-top: 0.6rem;
+}
+
+.bubble-details summary {
+    color: #555;
+    font-size: 0.78rem;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s;
+}
+
+.bubble-details summary:hover {
+    color: #888;
+}
+
+.bubble-details[open] summary {
+    margin-bottom: 0.5rem;
+}
+
+.bubble-pre {
+    background: #0f0f0f;
+    border: 1px solid #282828;
+    border-radius: 6px;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.72rem;
+    color: #888;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+    margin: 0;
+}

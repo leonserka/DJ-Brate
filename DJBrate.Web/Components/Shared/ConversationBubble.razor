@@ -1,0 +1,154 @@
+@using DJBrate.Domain.Entities
+@using System.Text.Json
+@using System.Text.RegularExpressions
+
+@if (Message.Role == AiMessageRoles.Function)
+{
+    @* function role is internal noise — never rendered *@
+}
+else if (Message.Role == AiMessageRoles.Assistant && Message.Content.StartsWith("[tool_call:"))
+{
+    <div class="bubble-tool-call">
+        @GetToolLabel(Message.Content)
+    </div>
+}
+else if (Message.Role == AiMessageRoles.User)
+{
+    <div class="bubble bubble-user">
+        @if (_userMainText is not null)
+        {
+            <p class="bubble-text">@_userMainText</p>
+            @if (_userTags.Count > 0)
+            {
+                <div class="bubble-tags">
+                    @foreach (var tag in _userTags)
+                    {
+                        <span class="bubble-tag">@tag</span>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <p class="bubble-text">@Message.Content</p>
+        }
+    </div>
+}
+else if (Message.Role == AiMessageRoles.Assistant)
+{
+    <div class="bubble bubble-assistant">
+        @if (_reasoning is not null)
+        {
+            <p class="bubble-text">@_reasoning</p>
+            <details class="bubble-details">
+                <summary>Full response</summary>
+                <pre class="bubble-pre">@Message.Content</pre>
+            </details>
+        }
+        else
+        {
+            <p class="bubble-text">@Message.Content</p>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public AiConversationMessage Message { get; set; } = null!;
+
+    private string? _reasoning;
+    private string? _userMainText;
+    private List<string> _userTags = [];
+
+    private static readonly Dictionary<string, string> ToolLabels = new()
+    {
+        ["get_user_top_tracks"]  = "🔧 DJ Brate checked your top tracks",
+        ["get_user_top_artists"] = "🔧 DJ Brate checked your top artists",
+    };
+
+    private static readonly Regex SplitOnMeta = new(
+        @"\.\s+(?=(?:My mood|Preferred genres|Energy level|Danceability):)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly string[] MetaKeywords = ["My mood", "Preferred genres", "Energy level", "Danceability"];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _reasoning    = null;
+        _userMainText = null;
+        _userTags     = [];
+
+        if (Message.Role == AiMessageRoles.User)
+        {
+            ParseUserPrompt(Message.Content);
+            return;
+        }
+
+        if (Message.Role != AiMessageRoles.Assistant) return;
+        if (Message.Content.StartsWith("[tool_call:")) return;
+
+        var trimmed = Message.Content.TrimStart();
+        if (!trimmed.StartsWith("{")) return;
+
+        var parseTask = Task.Run(() =>
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            return doc.RootElement.TryGetProperty("reasoning", out var r) ? r.GetString() : null;
+        });
+        await ((Task)parseTask).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        if (parseTask.IsCompletedSuccessfully)
+            _reasoning = parseTask.Result;
+    }
+
+    private void ParseUserPrompt(string content)
+    {
+        var parts = SplitOnMeta.Split(content);
+        var tags = new List<string>();
+        var mainParts = new List<string>();
+
+        foreach (var part in parts)
+        {
+            var matched = false;
+            foreach (var keyword in MetaKeywords)
+            {
+                if (!part.StartsWith(keyword + ":", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var value = part[(keyword.Length + 1)..].Trim().TrimEnd('.');
+                var tag = keyword.ToLowerInvariant() switch
+                {
+                    "my mood"          => $"Mood: {value}",
+                    "preferred genres" => $"Genres: {value}",
+                    "energy level"     => $"Energy: {FormatSlider(value)}",
+                    "danceability"     => $"Danceability: {FormatSlider(value)}",
+                    _                  => $"{keyword}: {value}"
+                };
+                tags.Add(tag);
+                matched = true;
+                break;
+            }
+            if (!matched)
+                mainParts.Add(part);
+        }
+
+        _userMainText = string.Join(". ", mainParts).Trim().TrimEnd('.');
+        _userTags     = tags;
+    }
+
+    private static string FormatSlider(string raw)
+    {
+        if (!float.TryParse(raw.Split('/')[0].Trim(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var val))
+            return raw;
+
+        return $"{(int)Math.Round(val * 100)}%";
+    }
+
+    private static string GetToolLabel(string content)
+    {
+        foreach (var (toolName, label) in ToolLabels)
+        {
+            if (content.Contains(toolName))
+                return label;
+        }
+        return "🔧 DJ Brate used a tool";
+    }
+}
